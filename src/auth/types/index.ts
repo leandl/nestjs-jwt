@@ -1,3 +1,4 @@
 export * from './tokens.type';
-export * from './payload.type';
+export * from './jwt-payload.type';
+export * from './jwt-payload-with-refresh-token.type';
 export * from './token-options.type';

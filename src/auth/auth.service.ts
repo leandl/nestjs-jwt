@@ -3,7 +3,7 @@ import { PrismaService } from 'src/prisma/prisma.service';
 import { AuthDto } from './dto';
 
 import * as bcrypt from 'bcrypt';
-import { Payload, TokenOptions, Tokens } from './types';
+import { JwtPayload, TokenOptions, Tokens } from './types';
 import { JwtService } from '@nestjs/jwt';
 
 const FIFTEEN_MINUTES = 60 * 15;
@@ -34,29 +34,67 @@ export class AuthService {
       },
     });
 
-    if (!user) throw new ForbiddenException('Access Denied!');
+    if (!user) {
+      throw new ForbiddenException('Access Denied!');
+    }
 
     const passwordValid = await bcrypt.compare(data.password, user.password);
     if (!passwordValid) throw new ForbiddenException('Access Denied!');
 
     const tokens = await this.getTokens(user.id, user.email);
-    this.updateRefreshTokenHash(user.id, tokens.refresh_token);
+    await this.updateRefreshTokenHash(user.id, tokens.refresh_token);
     return tokens;
   }
 
-  logout() {}
-  refreshTokens() {}
+  async logout(userId: number) {
+    await this.prisma.user.updateMany({
+      where: {
+        id: userId,
+        hashRefreshToken: {
+          not: null,
+        },
+      },
+      data: {
+        hashRefreshToken: null,
+      },
+    });
+  }
+
+  async refreshTokens(userId: number, refreshToken: string): Promise<Tokens> {
+    const user = await this.prisma.user.findUnique({
+      where: {
+        id: userId,
+      },
+    });
+
+    if (!user || !user.hashRefreshToken) {
+      throw new ForbiddenException('Access Denied!');
+    }
+
+    const refreshTokenValid = await bcrypt.compare(
+      refreshToken,
+      user.hashRefreshToken,
+    );
+
+    if (!refreshTokenValid) {
+      throw new ForbiddenException('Access Denied!');
+    }
+
+    const tokens = await this.getTokens(user.id, user.email);
+    await this.updateRefreshTokenHash(user.id, tokens.refresh_token);
+    return tokens;
+  }
 
   private async generateHash(data: string): Promise<string> {
     return await bcrypt.hash(data, 10);
   }
 
-  private async getToken(payload: Payload, options: TokenOptions) {
+  private async getToken(payload: JwtPayload, options: TokenOptions) {
     return await this.jwtService.signAsync(payload, options);
   }
 
   private async getTokens(userId: number, email: string): Promise<Tokens> {
-    const payload: Payload = { userId, email };
+    const payload: JwtPayload = { sub: userId, email };
     const [accessToken, refreshToken] = await Promise.all([
       this.getToken(payload, {
         secret: 'at-secret',
